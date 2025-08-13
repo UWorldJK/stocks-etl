@@ -15,9 +15,21 @@ RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 
 os.makedirs("data", exist_ok=True)
 
-def fetch_prices(tickers, period_days):
+
+def fetch_prices(tickers, period_days) -> pd.DataFrame:
+    """
+    Fetch daily adjusted OHLCV data for the given tickers over the specified period.
+    Args:
+        tickers (list): List of ticker symbols to fetch data for.
+        period_days (int): Number of days to look back from today.
+
+    Returns:
+        pd.DataFrame: DataFrame containing date, ticker, open, high, low, close, volume.
+    """
     # Fetch daily adjusted OHLCV for the last N days
-    start = (datetime.now(timezone.utc) - timedelta(days=period_days)).date().isoformat()
+    start = (
+        (datetime.now(timezone.utc) - timedelta(days=period_days)).date().isoformat()
+    )
     # .strip() to handle any extra spaces in ticker list
     df = yf.download(
         tickers=[t.strip() for t in tickers],
@@ -53,3 +65,133 @@ def fetch_prices(tickers, period_days):
     return out[cols].sort_values(["ticker", "date"])
 
 
+def init_db(con):
+    """
+    Initialize the DuckDB database with the necessary tables.
+
+    Args:
+        con (duckdb.DuckDBPyConnection): DuckDB connection object.
+        that will be used to execute SQL commands. Connects to our .duckdb file in
+        the DBConnect file.
+    """
+    # this first table is used to handle the data grabbed from yfinance
+    # and cleaned by fetch_prices
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS raw_prices (
+            date DATE,
+            ticker VARCHAR,
+            open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE,
+            volume DOUBLE,
+            PRIMARY KEY (date, ticker)
+        );
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS daily_metrics (
+            date DATE,
+            ticker VARCHAR,
+            return_1d DOUBLE,
+            ma_7 DOUBLE, ma_30 DOUBLE,
+            vol_7 DOUBLE, vol_30 DOUBLE,
+            rsi DOUBLE,
+            PRIMARY KEY (date, ticker)
+        );
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS corr_30d (
+            date DATE,
+            ticker_a VARCHAR,
+            ticker_b VARCHAR,
+            corr_30d DOUBLE,
+            PRIMARY KEY (date, ticker_a, ticker_b)
+        );
+    """)
+
+def upsert_raw_prices(con, prices):
+    """
+    Upsert daily prices into the raw_prices table.
+
+    Args:
+        con (duckdb.DuckDBPyConnection): DuckDB connection object.
+        df (pd.DataFrame): DataFrame containing daily prices to upsert.
+    """
+    if prices.empty:
+        return
+
+    # this makes the price table we obtained from yfinance
+    # usable within duckdb SQL commands
+    # so this says register prices as a table in duckdb
+    con.register("prices_df", prices)
+    # this inserts everything from the prices_df table
+    # into the raw_prices table, replacing any existing rows
+    con.execute(
+        """
+        INSERT OR REPLACE INTO raw_prices
+        SELECT * FROM prices_df;
+    """)
+    return len(prices)
+
+
+def compute_tech(df):
+    '''
+    Compute technical indicators for the given DataFrame.
+    Args:
+        df (pd.DataFrame): DataFrame containing daily prices with columns:
+            date, ticker, open, high, low, close, volume.
+            Returns:    
+        pd.DataFrame: DataFrame with additional columns for technical indicators:
+            return_1d, ma_7, ma_30, vol_7, vol
+    '''
+    df = df.copy()
+    #The rolling standard deviation measures the variability (or volatility) 
+    # of a fixed number of consecutive data points in a time series. 
+    # It quantifies how much the values deviate from their rolling average.
+    df["return_1d"] = df.groupby("ticker")["close"].pct_change()
+    df["ma_7"]  = df.groupby("ticker")["close"].transform(lambda s: s.rolling(7).mean())
+    df["ma_30"] = df.groupby("ticker")["close"].transform(lambda s: s.rolling(30).mean())
+    df["vol_7"]  = df.groupby("ticker")["return_1d"].transform(lambda s: s.rolling(7).std())
+    df["vol_30"] = df.groupby("ticker")["return_1d"].transform(lambda s: s.rolling(30).std())
+
+    # Calulcate RSI: RElative Strength Index
+    def compute_rsi(series, window=14):
+        # has a default value of 1 and sees difference with previous row
+        delta = series.diff()
+        # .where is used to replace negative values with 0
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+
+        avg_gain = gain.rolling(window=window, min_periods=1).mean()
+        avg_loss = loss.rolling(window=window, min_periods=1).mean()
+
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+
+        return rsi
+
+    df["rsi"] = df.groupby("ticker")["close"].apply(lambda group: compute_rsi(group, 14))
+    return df
+
+def upsert_metrics(con, metrics):
+    """
+    Upsert daily metrics into the daily_metrics table.
+
+    Args:
+        con (duckdb.DuckDBPyConnection): DuckDB connection object.
+        df (pd.DataFrame): DataFrame containing daily metrics to upsert.
+    """
+    if metrics.empty:
+        return 0
+
+    # Register the DataFrame as a DuckDB table
+    cols = ["date","ticker","return_1d","ma_7","ma_30","vol_7","vol_30","rsi"]
+    con.register("metrics_df", metrics[cols])
+    con.execute("INSERT OR REPLACE INTO daily_metrics SELECT * FROM metrics_df;")
+
+    con.execute("""
+        COPY (
+            SELECT * FROM daily_metrics
+            WHERE date >= current_date - INTERVAL 120 DAY
+            ORDER BY date DESC, ticker
+        ) TO ? WITH (HEADER, DELIMITER ',');
+    """, [EXPORT_CSV])
+    
+    return len(metrics)
