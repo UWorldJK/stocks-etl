@@ -1,6 +1,9 @@
 name: Run ETL Pipeline
 
 on:
+  push:  # Trigger the workflow on every push
+    branches:
+      - main  # Specify the branch to monitor
   schedule:
     - cron: "0 0 * * *"  # Run daily at midnight
   workflow_dispatch:  # Allow manual triggering of the workflow
@@ -13,7 +16,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Docker Compose
+      - name: Set up Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+
+      - name: Build and Run Docker Compose
         run: |
           docker-compose up --build --abort-on-container-exit
-          
