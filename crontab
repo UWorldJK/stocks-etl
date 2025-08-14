@@ -1,1 +1,0 @@
-30 1 * * * /usr/local/bin/python /stocks-etl/pipeline.py >> /proc/1/fd/1 2>&1

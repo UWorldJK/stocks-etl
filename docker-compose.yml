@@ -6,13 +6,5 @@ services:
       - data:/stocks-etl/data
     command: ["python", "pipeline.py"]
 
-  scheduler:
-    build: .
-    env_file: .env
-    volumes:
-      - data:/stocks-etl/data
-    command: ["supercronic", "-quiet", "/stocks-etl/crontab"]
-    restart: unless-stopped
-
 volumes:
   data:
