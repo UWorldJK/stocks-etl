@@ -76,7 +76,8 @@ def init_db(con):
     """
     # this first table is used to handle the data grabbed from yfinance
     # and cleaned by fetch_prices
-    con.execute("""
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS raw_prices (
             date DATE,
             ticker VARCHAR,
@@ -84,8 +85,10 @@ def init_db(con):
             volume DOUBLE,
             PRIMARY KEY (date, ticker)
         );
-    """)
-    con.execute("""
+    """
+    )
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS daily_metrics (
             date DATE,
             ticker VARCHAR,
@@ -95,8 +98,10 @@ def init_db(con):
             rsi DOUBLE,
             PRIMARY KEY (date, ticker)
         );
-    """)
-    con.execute("""
+    """
+    )
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS corr_30d (
             date DATE,
             ticker_a VARCHAR,
@@ -104,7 +109,9 @@ def init_db(con):
             corr_30d DOUBLE,
             PRIMARY KEY (date, ticker_a, ticker_b)
         );
-    """)
+    """
+    )
+
 
 def upsert_raw_prices(con, prices):
     """
@@ -127,48 +134,68 @@ def upsert_raw_prices(con, prices):
         """
         INSERT OR REPLACE INTO raw_prices
         SELECT * FROM prices_df;
+    """
+    )
+    output_path = "data/raw_prices_export.csv"
+    safe_path = output_path.replace("'", "''")  # escape quotes just in case
+    con.execute(f"""
+        COPY (
+            SELECT *
+            FROM raw_prices
+            ORDER BY date DESC, ticker
+        ) TO '{safe_path}' WITH (HEADER, DELIMITER ',');
     """)
     return len(prices)
 
 
 def compute_tech(df):
-    '''
+    """
     Compute technical indicators for the given DataFrame.
     Args:
         df (pd.DataFrame): DataFrame containing daily prices with columns:
             date, ticker, open, high, low, close, volume.
-            Returns:    
+            Returns:
         pd.DataFrame: DataFrame with additional columns for technical indicators:
             return_1d, ma_7, ma_30, vol_7, vol
-    '''
+    """
     df = df.copy()
-    #The rolling standard deviation measures the variability (or volatility) 
-    # of a fixed number of consecutive data points in a time series. 
+    # The rolling standard deviation measures the variability (or volatility)
+    # of a fixed number of consecutive data points in a time series.
     # It quantifies how much the values deviate from their rolling average.
     df["return_1d"] = df.groupby("ticker")["close"].pct_change()
-    df["ma_7"]  = df.groupby("ticker")["close"].transform(lambda s: s.rolling(7).mean())
-    df["ma_30"] = df.groupby("ticker")["close"].transform(lambda s: s.rolling(30).mean())
-    df["vol_7"]  = df.groupby("ticker")["return_1d"].transform(lambda s: s.rolling(7).std())
-    df["vol_30"] = df.groupby("ticker")["return_1d"].transform(lambda s: s.rolling(30).std())
+    df["ma_7"] = df.groupby("ticker")["close"].transform(lambda s: s.rolling(7).mean())
+    df["ma_30"] = df.groupby("ticker")["close"].transform(
+        lambda s: s.rolling(30).mean()
+    )
+    df["vol_7"] = df.groupby("ticker")["return_1d"].transform(
+        lambda s: s.rolling(7).std()
+    )
+    df["vol_30"] = df.groupby("ticker")["return_1d"].transform(
+        lambda s: s.rolling(30).std()
+    )
 
     # Calulcate RSI: RElative Strength Index
-    def compute_rsi(series, window=14):
+    def compute_rsi(series, n=14):
         # has a default value of 1 and sees difference with previous row
         delta = series.diff()
         # .where is used to replace negative values with 0
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
 
-        avg_gain = gain.rolling(window=window, min_periods=1).mean()
-        avg_loss = loss.rolling(window=window, min_periods=1).mean()
+        avg_gain = gain.ewm(alpha=1 / n, min_periods=n, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1 / n, min_periods=n, adjust=False).mean()
 
-        rs = avg_gain / avg_loss
+        rs = avg_gain / avg_loss.replace(0, pd.NA)
         rsi = 100 - (100 / (1 + rs))
-
         return rsi
 
-    df["rsi"] = df.groupby("ticker")["close"].apply(lambda group: compute_rsi(group, 14))
+    df["rsi"] = (
+        df.groupby("ticker")["close"]
+        .apply(lambda group: compute_rsi(group, 14))
+        .reset_index(level=0, drop=True)  # Align the index with the original DataFrame
+    )
     return df
+
 
 def upsert_metrics(con, metrics):
     """
@@ -182,16 +209,17 @@ def upsert_metrics(con, metrics):
         return 0
 
     # Register the DataFrame as a DuckDB table
-    cols = ["date","ticker","return_1d","ma_7","ma_30","vol_7","vol_30","rsi"]
+    cols = ["date", "ticker", "return_1d", "ma_7", "ma_30", "vol_7", "vol_30", "rsi"]
     con.register("metrics_df", metrics[cols])
     con.execute("INSERT OR REPLACE INTO daily_metrics SELECT * FROM metrics_df;")
 
-    con.execute("""
+    con.execute(f"""
         COPY (
-            SELECT * FROM daily_metrics
+            SELECT *
+            FROM daily_metrics
             WHERE date >= current_date - INTERVAL 120 DAY
             ORDER BY date DESC, ticker
-        ) TO ? WITH (HEADER, DELIMITER ',');
-    """, [EXPORT_CSV])
-    
+        ) TO '{EXPORT_CSV}' WITH (HEADER, DELIMITER ',');
+    """)
+
     return len(metrics)
