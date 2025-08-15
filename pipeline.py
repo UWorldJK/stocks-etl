@@ -224,5 +224,5 @@ def upsert_metrics(con, metrics):
 
     return len(metrics)
 
-if __name__=="main":
+if __name__== "__main__":
     print("Starting ETL pipeline...")
