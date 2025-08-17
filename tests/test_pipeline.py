@@ -7,5 +7,4 @@ EXPORT_CSV = "data/daily_metrics.csv"
 LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", "400"))  # historical backfill
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 
-
-assert fetch_prices(TICKERS, LOOKBACK_DAYS) 
+assert not fetch_prices(TICKERS, LOOKBACK_DAYS).empty
