@@ -1,5 +1,6 @@
-import pytest 
-from pipeline import fetch_prices
+import pytest
+import os
+from src.pipeline import fetch_prices
 TICKERS = os.getenv("TICKERS", "AAPL,MSFT,TSLA,SPY,QQQ").split(",")
 DB_PATH = "data/market.duckdb"
 EXPORT_CSV = "data/daily_metrics.csv"

@@ -12,8 +12,8 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application files
-COPY pipeline.py ./pipeline.py
+# then app code
+COPY . .
 
-# Default command: run the ETL pipeline
-CMD ["python", "pipeline.py"]
+# default command (Compose will override, but this is nice locally)
+CMD ["python", "src/pipeline.py"]

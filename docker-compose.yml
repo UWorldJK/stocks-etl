@@ -4,7 +4,7 @@ services:
     env_file: .env
     volumes:
       - data:/stocks-etl/data
-    command: ["python", "pipeline.py"]
+    command: ["python", "src/pipeline.py"]
 
 volumes:
   data:
