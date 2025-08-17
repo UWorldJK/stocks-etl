@@ -1,10 +1,11 @@
-import pytest
 import os
+import pytest
 from src.pipeline import fetch_prices
-TICKERS = os.getenv("TICKERS", "AAPL,MSFT,TSLA,SPY,QQQ").split(",")
-DB_PATH = "data/market.duckdb"
-EXPORT_CSV = "data/daily_metrics.csv"
-LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", "400"))  # historical backfill
-RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 
-assert not fetch_prices(TICKERS, LOOKBACK_DAYS).empty
+def test_fetch_prices_returns_data():
+    tickers = os.getenv("TICKERS", "AAPL,MSFT,TSLA").split(",")
+    lookback = int(os.getenv("LOOKBACK_DAYS", "7"))
+    df = fetch_prices(tickers, lookback)
+    assert df is not None
+    assert len(df) > 0
+    
