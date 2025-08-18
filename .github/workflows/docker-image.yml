@@ -43,6 +43,7 @@ jobs:
       - name: Copy CSV to artifacts
         run: |
           mkdir -p artifacts
+          docker compose up --build --abort-on-container-exit --exit-code-from etl
           cp data/daily_metrics.csv artifacts/daily_metrics.csv
       - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
