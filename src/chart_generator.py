@@ -20,17 +20,22 @@ class ChartGenerator:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         
-        # Set matplotlib parameters for better quality but smaller file sizes
-        plt.rcParams['figure.dpi'] = 150  # Reduced from 300 for smaller files
+        # Set matplotlib parameters for professional quality
+        plt.rcParams['figure.dpi'] = 150
         plt.rcParams['savefig.dpi'] = 150
-        plt.rcParams['figure.figsize'] = (10, 6)  # Slightly smaller default size
-        plt.rcParams['font.size'] = 9
+        plt.rcParams['figure.figsize'] = (12, 8)
+        plt.rcParams['font.size'] = 10
+        plt.rcParams['axes.linewidth'] = 0.8
+        plt.rcParams['grid.alpha'] = 0.3
+        plt.rcParams['axes.spines.top'] = False
+        plt.rcParams['axes.spines.right'] = False
     
-    def _save_chart_as_base64(self, fig, format='png', quality=85) -> str:
+    def _save_chart_as_base64(self, fig, format='png') -> str:
         """Convert matplotlib figure to base64 string for embedding in email."""
         buffer = BytesIO()
         fig.savefig(buffer, format=format, bbox_inches='tight', 
-                   facecolor='white', dpi=150)  # Lower DPI for smaller size
+                   facecolor='white', edgecolor='none', dpi=150,
+                   pad_inches=0.1, transparent=False)
         buffer.seek(0)
         
         # Convert to base64
@@ -49,23 +54,59 @@ class ChartGenerator:
         
         charts = {}
         
-        # 1. Market Overview Chart
-        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        # 1. Market Overview Chart - Professional styling
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.patch.set_facecolor('white')
         
-        # Moving Averages (top-left)
+        # Color palette for professional look
+        colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#6A994E', '#577590']
+        
+        # Moving Averages (top-left) - Professional styling
         ax1 = axes[0, 0]
         if 'ma_7' in df.columns:
-            for ticker in sorted(df['ticker'].unique()):
+            for i, ticker in enumerate(sorted(df['ticker'].unique())):
                 ticker_data = df[df['ticker'] == ticker].sort_values(date_col)
+                color = colors[i % len(colors)]
                 ax1.plot(ticker_data[date_col], ticker_data['ma_7'], 
-                        linewidth=2, alpha=0.8, label=ticker)
-            ax1.set_title('7-Day Moving Averages', fontweight='bold')
-            ax1.legend(fontsize=8)
-            ax1.grid(True, alpha=0.3)
-            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
-            plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
+                        linewidth=2.5, alpha=0.9, label=ticker, color=color)
+            ax1.set_title('7-Day Moving Averages', fontweight='bold', fontsize=14, pad=15)
+            ax1.legend(fontsize=9, framealpha=0.9)
+            ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, fontsize=9)
+            ax1.set_ylabel('Price ($)', fontsize=10, fontweight='bold')
+            
+            # Style improvements
+            ax1.spines['top'].set_visible(False)
+            ax1.spines['right'].set_visible(False)
+            ax1.set_facecolor('#fafafa')
         
-        # RSI (top-right)
+        # RSI (top-right) - Professional styling
+        ax2 = axes[0, 1]
+        if 'rsi' in df.columns:
+            for i, ticker in enumerate(sorted(df['ticker'].unique())):
+                ticker_data = df[df['ticker'] == ticker].sort_values(date_col)
+                color = colors[i % len(colors)]
+                ax2.plot(ticker_data[date_col], ticker_data['rsi'], 
+                        linewidth=2.5, alpha=0.9, label=ticker, color=color)
+            
+            # RSI threshold lines
+            ax2.axhline(y=70, color='#DC2626', linestyle='--', alpha=0.7, linewidth=2, label='Overbought')
+            ax2.axhline(y=30, color='#16A34A', linestyle='--', alpha=0.7, linewidth=2, label='Oversold')
+            ax2.axhline(y=50, color='#6B7280', linestyle='-', alpha=0.4, linewidth=1)
+            
+            ax2.set_title('RSI - Momentum Indicator', fontweight='bold', fontsize=14, pad=15)
+            ax2.set_ylim(0, 100)
+            ax2.legend(fontsize=9, framealpha=0.9)
+            ax2.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, fontsize=9)
+            ax2.set_ylabel('RSI Value', fontsize=10, fontweight='bold')
+            
+            # Style improvements
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+            ax2.set_facecolor('#fafafa')
         ax2 = axes[0, 1]
         if 'rsi' in df.columns:
             for ticker in sorted(df['ticker'].unique()):
