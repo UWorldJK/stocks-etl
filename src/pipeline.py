@@ -8,12 +8,12 @@ from datetime import datetime, timedelta, timezone
 
 # ---- Config from environment ----
 TICKERS = os.getenv("TICKERS", "AAPL,MSFT,TSLA,SPY,QQQ").split(",")
-DB_PATH = "../data/market.duckdb"
-EXPORT_CSV = "../data/daily_metrics.csv"
+DB_PATH = "data/market.duckdb"
+EXPORT_CSV = "data/daily_metrics.csv"
 LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", "400"))  # historical backfill
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 
-os.makedirs("../data", exist_ok=True)
+os.makedirs("data", exist_ok=True)
 
 
 def fetch_prices(tickers, period_days) -> pd.DataFrame:
@@ -136,7 +136,7 @@ def upsert_raw_prices(con, prices):
         SELECT * FROM prices_df;
     """
     )
-    output_path = "../data/raw_prices_export.csv"
+    output_path = "data/raw_prices_export.csv"
     safe_path = output_path.replace("'", "''")  # escape quotes just in case
     con.execute(f"""
         COPY (
@@ -224,11 +224,20 @@ def upsert_metrics(con, metrics):
 
     return len(metrics)
 
-if __name__== "__main__":
-    print("Starting ETL pipeline...")
+
+def main():
+    print('getting prices...')
     prices = fetch_prices(TICKERS, LOOKBACK_DAYS)
+    print(prices.head)
+    print('fetching prices complete, computing metrics...')
     metrics = compute_tech(prices)
     con = duckdb.connect(DB_PATH)
     init_db(con)
-    n_metrics = upsert_metrics(con, metrics)
+    print('upserting metrics...')
+    upsert_metrics(con, metrics)
+    print('upserting raw prices...')
     upsert_raw_prices(con, prices)
+
+if __name__== "__main__":
+    print("Starting ETL pipeline...")
+    main()

@@ -8,7 +8,7 @@ from botocore.exceptions import ClientError
 
 def send_email(sender, recipient, subject, body_text, body_html, attachment_path):
     CHARSET = "utf-8"
-    AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+    AWS_REGION = "us-west-2"
     client = boto3.client("ses", region_name=AWS_REGION)
 
     msg = MIMEMultipart("mixed")
