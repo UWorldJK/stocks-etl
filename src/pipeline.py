@@ -174,7 +174,7 @@ def compute_tech(df):
         lambda s: s.rolling(30).std()
     )
 
-    # Calulcate RSI: RElative Strength Index
+    # Calulcate RSI: Relative Strength Index
     def compute_rsi(series, n=14):
         # has a default value of 1 and sees difference with previous row
         delta = series.diff()

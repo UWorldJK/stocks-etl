@@ -1,5 +1,8 @@
+# requirements.txt
 yfinance
 pandas
 duckdb
 numpy
 pytest
+matplotlib
+boto3
