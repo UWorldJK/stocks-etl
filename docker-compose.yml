@@ -4,8 +4,8 @@ services:
     build: .
     env_file: .env
     volumes:
-      - ./data:/app/data        # bind mount into the container (NOT a named volume)
+      - data:/data             # ⬅️ match your ../data -> /data
     command: ["python", "src/pipeline.py"]
 
-# no 'volumes:' section needed anymore
-
+volumes:
+  data:
