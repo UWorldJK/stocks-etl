@@ -225,6 +225,43 @@ def upsert_metrics(con, metrics):
     return len(metrics)
 
 
+# Add this to the end of your existing pipeline.py file
+
+def generate_charts():
+    """Generate charts after the ETL pipeline completes."""
+    try:
+        # Import here to avoid dependency issues if matplotlib not available
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        
+        from chart_generator import generate_charts_from_csv
+        
+        # Create charts directory
+        os.makedirs("data/charts", exist_ok=True)
+        
+        # Generate charts from the CSV we just created
+        if os.path.exists(EXPORT_CSV):
+            print("📈 Generating visualization charts...")
+            chart_paths = generate_charts_from_csv(EXPORT_CSV, "data/charts")
+            
+            print(f"✅ Generated {len(chart_paths)} charts:")
+            for chart_path in chart_paths:
+                print(f"   - {chart_path}")
+            
+            return chart_paths
+        else:
+            print(f"❌ CSV file not found: {EXPORT_CSV}")
+            return []
+            
+    except ImportError as e:
+        print(f"⚠️  Chart generation skipped - missing dependencies: {e}")
+        return []
+    except Exception as e:
+        print(f"❌ Chart generation failed: {e}")
+        return []
+
+# Modify your main function to include chart generation
 def main():
     print('getting prices...')
     prices = fetch_prices(TICKERS, LOOKBACK_DAYS)
@@ -237,6 +274,15 @@ def main():
     upsert_metrics(con, metrics)
     print('upserting raw prices...')
     upsert_raw_prices(con, prices)
+    
+    # Generate charts after data processing
+    chart_paths = generate_charts()
+    
+    print(f"\n📋 ETL Pipeline Summary:")
+    print(f"   Tickers processed: {', '.join(TICKERS)}")
+    print(f"   Data exported to: {EXPORT_CSV}")
+    print(f"   Charts generated: {len(chart_paths)}")
+    print("🎉 ETL Pipeline completed successfully!")
 
 if __name__== "__main__":
     print("Starting ETL pipeline...")

@@ -43,6 +43,15 @@ jobs:
         run: |
           ls -la data
           test -f data/daily_metrics.csv
+          echo "CSV verified successfully"
+          
+          # Check for charts
+          if [ -d "data/charts" ]; then
+            echo "Charts directory found:"
+            ls -la data/charts/
+          else
+            echo "No charts directory found"
+          fi
 
       - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
@@ -50,6 +59,14 @@ jobs:
           name: daily_metrics_csv
           path: data/daily_metrics.csv
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Charts artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: financial_charts
+          path: data/charts/
+          if-no-files-found: ignore
           retention-days: 7
 
   email-report:
@@ -71,10 +88,47 @@ jobs:
           name: daily_metrics_csv
           path: artifacts
 
+      - name: Download Charts artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: financial_charts
+          path: artifacts/charts
+        continue-on-error: true
+
+      - name: List all available artifacts (debug)
+        uses: actions/download-artifact@v4
+        with:
+          path: all_artifacts
+        continue-on-error: true
+
+      - name: Debug artifact download
+        run: |
+          echo "Current directory contents:"
+          ls -la
+          echo "=== All downloaded artifacts ==="
+          ls -la all_artifacts/ || echo "No all_artifacts directory found"
+          echo "=== Target artifacts directory ==="
+          ls -la artifacts/ || echo "Target artifacts directory not found"
+          echo "=== Charts directory ==="
+          ls -la artifacts/charts/ || echo "No charts directory found"
+          echo "=== All files in workspace ==="
+          find . -name "*.csv" -o -name "*.png" | head -20
+
       - name: Verify attachment exists (sanity check)
         run: |
+          if [ ! -d "artifacts" ]; then
+            echo "ERROR: artifacts directory does not exist"
+            echo "This suggests the artifact download failed"
+            exit 1
+          fi
           ls -la artifacts
-          test -f artifacts/daily_metrics.csv
+          if [ ! -f "artifacts/daily_metrics.csv" ]; then
+            echo "ERROR: daily_metrics.csv not found in artifacts/"
+            echo "Contents of artifacts directory:"
+            ls -la artifacts/
+            exit 1
+          fi
+          echo "SUCCESS: daily_metrics.csv found"
 
       - name: Send email via SES
         env:
