@@ -38,6 +38,44 @@ def get_priority_charts(chart_files):
     
     return priority_charts
 
+def get_priority_charts_for_attachments(chart_files):
+    """Select the most important ~15 charts for attachments."""
+    # High priority summary charts (always include)
+    high_priority = [
+        'financial_dashboard.png',
+        'moving_averages_comparison.png', 
+        'rsi_analysis.png',
+        'volatility_analysis.png',
+        'all_tickers_ma_7_comparison.png',
+        'all_tickers_rsi_comparison.png',
+        'all_tickers_vol_30_comparison.png'
+    ]
+    
+    # Important individual ticker charts (key stocks only)
+    key_tickers = [
+        'SPY_ma_7_timeseries.png',
+        'SPY_rsi_timeseries.png',
+        'QQQ_ma_7_timeseries.png', 
+        'QQQ_rsi_timeseries.png',
+        'AAPL_ma_7_timeseries.png',
+        'AAPL_rsi_timeseries.png',
+        'MSFT_ma_7_timeseries.png',
+        'MSFT_rsi_timeseries.png',
+        'NVDA_ma_7_timeseries.png',
+        'NVDA_rsi_timeseries.png'
+    ]
+    
+    all_priority_patterns = high_priority + key_tickers
+    priority_attachments = []
+    
+    for pattern in all_priority_patterns:
+        for chart_file in chart_files:
+            if pattern in os.path.basename(chart_file):
+                priority_attachments.append(chart_file)
+                break
+    
+    return priority_attachments
+
 def main():
     """Main function to send the ETL report email."""
     
@@ -91,8 +129,12 @@ def main():
                 'cid': f'chart_{i}'  # Content ID for referencing in HTML
             })
     
-    # Prepare all attachments (CSV + charts)
-    all_attachments = [attachment_path] + chart_files
+    # Get priority charts for attachments (limit to ~15 most important)
+    priority_attachments = get_priority_charts_for_attachments(chart_files)
+    print(f"Selected {len(priority_attachments)} priority charts for attachments")
+    
+    # Prepare all attachments (CSV + priority charts only)
+    all_attachments = [attachment_path] + priority_attachments
     
     # Get file info for email content
     csv_size = os.path.getsize(attachment_path)
@@ -105,10 +147,10 @@ def main():
     current_date = datetime.now().strftime("%Y-%m-%d")
     subject = f"📊 Financial ETL Report - {current_date}"
     
-    # Generate chart list for email
+    # Generate chart list for email (use priority attachments)
     chart_list = ""
-    if chart_files:
-        chart_list = "\n".join([f"  📈 {os.path.basename(f)}" for f in chart_files])
+    if priority_attachments:
+        chart_list = "\n".join([f"  📈 {os.path.basename(f)}" for f in priority_attachments])
     else:
         chart_list = "  ⚠️  No charts generated"
     
@@ -122,7 +164,7 @@ Your financial data pipeline has completed successfully!
 📋 Report Summary:
 - Date: {current_date}
 - CSV Data: {os.path.basename(attachment_path)} ({csv_size_mb:.2f} MB)
-- Visualization Charts: {len(chart_files)} files
+- Visualization Charts: {len(priority_attachments)} files
 
 📈 Charts Included:
 {chart_list}
@@ -250,7 +292,7 @@ Best regards,
                         <span class="stat-label">MB CSV Data</span>
                     </div>
                     <div class="stat-item">
-                        <span class="stat-number">{len(chart_files)}</span>
+                        <span class="stat-number">{len(priority_attachments)}</span>
                         <span class="stat-label">Charts</span>
                     </div>
                     <div class="stat-item">
@@ -280,9 +322,9 @@ Best regards,
     try:
         print(f"Sending email from {sender_email} to {recipient_email}")
         print(f"CSV attachment: {attachment_path}")
-        print(f"Chart attachments: {len(chart_files)}")
+        print(f"Chart attachments: {len(priority_attachments)}")
         print(f"Embedded images: {len(embedded_images)}")
-        for chart in chart_files:
+        for chart in priority_attachments:
             print(f"  - {chart}")
         
         message_id = send_email(

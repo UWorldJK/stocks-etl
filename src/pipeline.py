@@ -7,7 +7,7 @@ import yfinance as yf
 from datetime import datetime, timedelta, timezone
 
 # ---- Config from environment ----
-TICKERS = os.getenv("TICKERS", "SPY,QQQ,VTI,AAPL,MSFT,GOOGL,NVDA,AMZN,TSLA,META,XLK,SOXX,ARKK,IGV,VIX,TLT").split(",")
+TICKERS = os.getenv("TICKERS", "SPY,QQQ,VTI,AAPL,MSFT,GOOGL,NVDA,AMZN,TSLA,META,XLK,SOXX,ARKK,IGV,TLT,PLTR").split(",")
 DB_PATH = "data/market.duckdb"
 EXPORT_CSV = "data/daily_metrics.csv"
 LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", "400"))  # historical backfill
