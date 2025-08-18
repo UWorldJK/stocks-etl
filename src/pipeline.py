@@ -8,12 +8,12 @@ from datetime import datetime, timedelta, timezone
 
 # ---- Config from environment ----
 TICKERS = os.getenv("TICKERS", "AAPL,MSFT,TSLA,SPY,QQQ").split(",")
-DB_PATH = "data/market.duckdb"
-EXPORT_CSV = "data/daily_metrics.csv"
+DB_PATH = "../data/market.duckdb"
+EXPORT_CSV = "../data/daily_metrics.csv"
 LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", "400"))  # historical backfill
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 
-os.makedirs("data", exist_ok=True)
+os.makedirs("../data", exist_ok=True)
 
 
 def fetch_prices(tickers, period_days) -> pd.DataFrame:
@@ -136,7 +136,7 @@ def upsert_raw_prices(con, prices):
         SELECT * FROM prices_df;
     """
     )
-    output_path = "data/raw_prices_export.csv"
+    output_path = "../data/raw_prices_export.csv"
     safe_path = output_path.replace("'", "''")  # escape quotes just in case
     con.execute(f"""
         COPY (
