@@ -80,7 +80,7 @@ jobs:
           python-version: '3.11'
       
       - name: Install deps
-        run: pip install boto3 botocore
+        run: pip install -r requirements.txt
 
       - name: Download CSV artifact
         uses: actions/download-artifact@v4

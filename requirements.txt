@@ -6,6 +6,5 @@ numpy
 pytest
 matplotlib
 boto3
-
-matplotlib>=3.5.0
+botocore
 seaborn>=0.11.0
