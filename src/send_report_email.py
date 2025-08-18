@@ -1,23 +1,24 @@
 # src/send_report_email.py
 """
-Script to send the ETL pipeline report via email with embedded charts.
-Called from GitHub Actions workflow.
+Script to send the ETL pipeline report via email with embedded charts (JPEG),
+laid out in a grid. Called from GitHub Actions workflow.
 """
 import os
 import sys
+import inspect
 from datetime import datetime
 from email_handler import send_email
 from chart_generator import generate_email_charts
 import pandas as pd
+from typing import Dict, List
 
 def main():
     """Main function to send the ETL report email with embedded charts."""
-    
     # Get required environment variables
-    sender_email = os.environ.get("SENDER_EMAIL")
-    recipient_email = os.environ.get("RECIPIENT_EMAIL")
-    attachment_path = os.environ.get("ATTACHMENT_PATH")  # CSV file
-    
+    sender_email = os.environ.get("SENDER_EMAIL", "jacobkurry1@gmail.com")
+    recipient_email = os.environ.get("RECIPIENT_EMAIL", "jacobkurry1@gmail.com")
+    attachment_path = os.environ.get("ATTACHMENT_PATH", "data/daily_metrics.csv")  # CSV file
+
     # Validate required environment variables
     missing_vars = []
     if not sender_email:
@@ -26,16 +27,16 @@ def main():
         missing_vars.append("RECIPIENT_EMAIL")
     if not attachment_path:
         missing_vars.append("ATTACHMENT_PATH")
-    
+
     if missing_vars:
         print(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
         return 1
-    
+
     # Verify CSV attachment exists
     if not os.path.exists(attachment_path):
         print(f"Error: CSV file not found: {attachment_path}")
         return 1
-    
+
     # Get basic CSV info for summary
     try:
         df = pd.read_csv(attachment_path)
@@ -52,31 +53,49 @@ def main():
         num_tickers = 0
         num_records = 0
         date_range = "Unknown"
-    
-    # Generate embedded charts
+
+    # Generate charts (JPEG on disk)
     try:
         print("🎨 Generating charts for email embedding...")
-        embedded_charts = generate_email_charts(attachment_path)
+        embedded_charts: Dict[str, Dict[str, str]] = generate_email_charts(attachment_path)
         print(f"✅ Generated {len(embedded_charts)} charts for embedding")
     except Exception as e:
         print(f"⚠️  Warning: Could not generate charts: {e}")
         embedded_charts = {}
-    
-    # Get file info for email content
+
+    # Prep inline CID map
+    inline_images: List[Dict[str, str]] = []
+    gallery_items: List[Dict[str, str]] = []
+
+    for i, (ckey, cdata) in enumerate(embedded_charts.items(), start=1):
+        img_path = cdata.get("image_path")
+        if not img_path or not os.path.exists(img_path):
+            continue
+        cid = f"chart{i}@etl"
+        inline_images.append({"cid": cid, "path": img_path})
+        gallery_items.append({
+            "cid": cid,
+            "title": cdata.get("title", f"Chart {i}"),
+            "description": cdata.get("description", "")
+        })
+
+    # File info for email content
     csv_size = os.path.getsize(attachment_path)
     csv_size_mb = csv_size / (1024 * 1024)
-    
-    # Create email content
+
+    # Email meta
     current_date = datetime.now().strftime("%Y-%m-%d")
-    current_time = datetime.now().strftime("%H:%M UTC")
+    current_time = datetime.now().strftime("%H:%M")
     subject = f"📊 Financial ETL Report - {current_date}"
-    
-    # Generate chart sections for email
-    charts_html = ""
-    charts_text = ""
-    
-    if embedded_charts:
-        charts_html = generate_charts_html(embedded_charts)
+
+    # Build HTML/text bodies (grid if inline supported, otherwise fallback)
+    supports_inline = _send_email_supports_inline_images()
+
+    if gallery_items and supports_inline:
+        charts_html = generate_charts_grid_html(gallery_items)
+        charts_text = generate_charts_text(embedded_charts)
+    elif gallery_items and not supports_inline:
+        charts_html = generate_charts_fallback_html([p["path"] for p in inline_images])
         charts_text = generate_charts_text(embedded_charts)
     else:
         charts_html = '''
@@ -86,8 +105,8 @@ def main():
         </div>
         '''
         charts_text = "⚠️ Charts could not be generated for this report."
-    
-    # Text version of email
+
+    # Text version
     body_text = f"""
 Financial ETL Pipeline Report - {current_date}
 
@@ -102,434 +121,96 @@ Your financial data pipeline has completed successfully!
 • Total Records: {num_records:,} data points
 • Date Range: {date_range}
 • CSV File: {os.path.basename(attachment_path)} ({csv_size_mb:.2f} MB)
-• Embedded Charts: {len(embedded_charts)} visualizations
+• Charts: {len(gallery_items)} visualizations
 
 📈 ANALYSIS OVERVIEW
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {charts_text}
 
-📚 KEY METRICS EXPLAINED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Moving Averages (7d/30d): Smoothed price trends over time periods
-  - Golden Cross: 7d MA crosses above 30d MA (bullish signal)
-  - Death Cross: 7d MA crosses below 30d MA (bearish signal)
-
-• RSI (Relative Strength Index): Momentum indicator (0-100 scale)
-  - Above 70: Potentially overbought (consider selling)
-  - Below 30: Potentially oversold (consider buying)
-  - Around 50: Neutral momentum
-
-• Volatility: Standard deviation of returns (price stability measure)
-  - Higher values: More price fluctuation and risk
-  - Lower values: More stable price movement
-
-• Daily Returns: Day-over-day percentage price changes
-  - Positive: Price increased
-  - Negative: Price decreased
-
-The attached CSV contains comprehensive data for detailed analysis. 
-Charts in the email provide visual insights into current market conditions.
-
-This report was generated automatically by your Financial ETL Pipeline.
-
-Best regards,
-📈 Financial ETL Bot
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Generated on {current_date} at {current_time}
+Best,
+Financial ETL Bot
     """.strip()
-    
-    # Professional HTML version with embedded charts
-    body_html = f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Financial ETL Report - {current_date}</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        
-        body {{ 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
-            line-height: 1.6;
-            color: #2c3e50;
-            background-color: #f8fafc;
-            margin: 0;
-            padding: 0;
-        }}
-        
-        .email-container {{
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-        }}
-        
-        .header {{ 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white; 
-            padding: 40px 30px;
-            text-align: center;
-            position: relative;
-        }}
-        
-        .header::after {{
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #f093fb 0%, #f5576c 50%, #4facfe 100%);
-        }}
-        
-        .header h1 {{ 
-            font-size: 32px; 
-            font-weight: 700;
-            margin-bottom: 10px;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        }}
-        
-        .header .subtitle {{ 
-            font-size: 18px; 
-            opacity: 0.9;
-            font-weight: 300;
-        }}
-        
-        .content {{ 
-            padding: 40px 30px; 
-        }}
-        
-        .greeting {{
-            font-size: 18px;
-            color: #2c3e50;
-            margin-bottom: 30px;
-            line-height: 1.7;
-        }}
-        
-        .summary-card {{ 
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 12px;
-            padding: 30px;
-            margin: 30px 0;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        }}
-        
-        .summary-card h2 {{
-            color: #1a365d;
-            font-size: 24px;
-            margin-bottom: 20px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-        }}
-        
-        .summary-card h2::before {{
-            content: '📋';
-            margin-right: 10px;
-            font-size: 28px;
-        }}
-        
-        .metrics-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-            margin: 20px 0;
-        }}
-        
-        .metric-item {{
-            text-align: center;
-            background: white;
-            padding: 20px 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            border: 2px solid transparent;
-            transition: all 0.3s ease;
-        }}
-        
-        .metric-item:hover {{
-            border-color: #667eea;
-            transform: translateY(-2px);
-        }}
-        
-        .metric-number {{ 
-            font-size: 28px; 
-            font-weight: 700; 
-            color: #667eea;
-            display: block;
-            margin-bottom: 5px;
-        }}
-        
-        .metric-label {{ 
-            font-size: 12px; 
-            color: #64748b; 
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }}
-        
-        .chart-section {{
-            margin: 40px 0;
-            background: white;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            border: 1px solid #e2e8f0;
-        }}
-        
-        .chart-header {{
-            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-            padding: 25px 30px;
-            border-bottom: 1px solid #e2e8f0;
-        }}
-        
-        .chart-title {{
-            font-size: 22px;
-            font-weight: 600;
-            color: #1a365d;
-            margin: 0 0 10px 0;
-            display: flex;
-            align-items: center;
-        }}
-        
-        .chart-title::before {{
-            content: '📊';
-            margin-right: 12px;
-            font-size: 24px;
-        }}
-        
-        .chart-description {{
-            font-size: 15px;
-            color: #64748b;
-            line-height: 1.6;
-            margin: 0;
-        }}
-        
-        .chart-content {{
-            padding: 30px;
-            text-align: center;
-        }}
-        
-        .chart-image {{
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            border: 1px solid #e2e8f0;
-        }}
-        
-        .info-section {{
-            background: linear-gradient(135deg, #e0f2fe 0%, #b3e5fc 100%);
-            border-radius: 12px;
-            padding: 30px;
-            margin: 30px 0;
-            border-left: 5px solid #0288d1;
-        }}
-        
-        .info-section h3 {{
-            color: #01579b;
-            font-size: 20px;
-            margin-bottom: 20px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-        }}
-        
-        .info-section h3::before {{
-            content: '📚';
-            margin-right: 10px;
-            font-size: 24px;
-        }}
-        
-        .metrics-list {{
-            list-style: none;
-            padding: 0;
-        }}
-        
-        .metrics-list li {{
-            margin: 15px 0;
-            padding: 15px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }}
-        
-        .metrics-list strong {{
-            color: #01579b;
-            font-weight: 600;
-        }}
-        
-        .footer {{ 
-            background: linear-gradient(135deg, #263238 0%, #37474f 100%);
-            color: #eceff1;
-            text-align: center; 
-            padding: 30px;
-            font-size: 14px;
-        }}
-        
-        .footer p {{
-            margin: 5px 0;
-        }}
-        
-        .footer .signature {{
-            font-weight: 600;
-            font-size: 16px;
-            margin-top: 15px;
-        }}
-        
-        .data-details {{
-            background: #f8fafc;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border: 1px solid #e2e8f0;
-        }}
-        
-        .data-details strong {{
-            color: #1a365d;
-        }}
-        
-        /* Responsive Design */
-        @media (max-width: 600px) {{
-            .email-container {{
-                margin: 0;
-                box-shadow: none;
-            }}
-            
-            .header, .content {{
-                padding: 20px;
-            }}
-            
-            .header h1 {{
-                font-size: 24px;
-            }}
-            
-            .summary-card, .chart-content, .info-section {{
-                padding: 20px;
-            }}
-            
-            .metrics-grid {{
-                grid-template-columns: repeat(2, 1fr);
-                gap: 15px;
-            }}
-            
-            .metric-number {{
-                font-size: 20px;
-            }}
-        }}
-        
-        /* Dark mode support */
-        @media (prefers-color-scheme: dark) {{
-            .chart-image {{
-                filter: brightness(0.9);
-            }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="email-container">
-        <div class="header">
-            <h1>📊 Financial ETL Report</h1>
-            <div class="subtitle">{current_date} • {current_time}</div>
-        </div>
-        
-        <div class="content">
-            <div class="greeting">
-                <strong>Hello! 👋</strong><br>
-                Your financial data pipeline has completed successfully and your comprehensive market analysis is ready for review.
-            </div>
-            
-            <div class="summary-card">
-                <h2>Report Summary</h2>
-                
-                <div class="metrics-grid">
-                    <div class="metric-item">
-                        <span class="metric-number">{num_tickers}</span>
-                        <span class="metric-label">Assets Tracked</span>
-                    </div>
-                    <div class="metric-item">
-                        <span class="metric-number">{num_records:,}</span>
-                        <span class="metric-label">Data Points</span>
-                    </div>
-                    <div class="metric-item">
-                        <span class="metric-number">{csv_size_mb:.1f}</span>
-                        <span class="metric-label">MB CSV Data</span>
-                    </div>
-                    <div class="metric-item">
-                        <span class="metric-number">{len(embedded_charts)}</span>
-                        <span class="metric-label">Visual Charts</span>
-                    </div>
-                </div>
-                
-                <div class="data-details">
-                    <p><strong>📄 Data File:</strong> {os.path.basename(attachment_path)}</p>
-                    <p><strong>📅 Date Range:</strong> {date_range}</p>
-                    <p><strong>📈 Analysis:</strong> Moving averages, RSI momentum, volatility metrics, and returns data</p>
-                </div>
-            </div>
-            
-            {charts_html}
-            
-            <div class="info-section">
-                <h3>Key Metrics Explained</h3>
-                <ul class="metrics-list">
-                    <li>
-                        <strong>Moving Averages (7d/30d):</strong> Smoothed price trends over different time periods. Golden Cross (7d above 30d) suggests bullish momentum, Death Cross (7d below 30d) suggests bearish momentum.
-                    </li>
-                    <li>
-                        <strong>RSI (Relative Strength Index):</strong> Momentum oscillator (0-100). Values above 70 indicate overbought conditions, below 30 indicate oversold conditions.
-                    </li>
-                    <li>
-                        <strong>Volatility:</strong> Standard deviation of returns measuring price stability. Higher values indicate greater price fluctuation and risk.
-                    </li>
-                    <li>
-                        <strong>Daily Returns:</strong> Day-over-day percentage price changes showing short-term performance and trend direction.
-                    </li>
-                </ul>
-            </div>
-            
-            <div style="background: #f0f9ff; border-radius: 12px; padding: 25px; margin: 30px 0; border-left: 5px solid #0ea5e9;">
-                <p style="margin: 0; color: #0c4a6e; font-size: 16px;">
-                    <strong>📎 Data Access:</strong> The attached CSV file contains comprehensive raw data for detailed analysis and custom reporting. All charts above provide visual insights into current market conditions and trends.
-                </p>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <p><em>This report was generated automatically by your Financial ETL Pipeline</em></p>
-            <div class="signature">📈 Financial ETL Bot</div>
-            <p style="margin-top: 15px; font-size: 12px; opacity: 0.7;">Generated on {current_date} at {current_time}</p>
-        </div>
-    </div>
-</body>
-</html>
-    """.strip()
-    
+
+    # HTML version (theme + grid)
+    body_html = build_full_html(
+        current_date=current_date,
+        current_time=current_time,
+        num_tickers=num_tickers,
+        num_records=num_records,
+        csv_size_mb=csv_size_mb,
+        embedded_count=len(gallery_items),
+        attachment_path=attachment_path,
+        date_range=date_range,
+        charts_html=charts_html
+    )
+
+    # Build attachments list
+    attachment_paths = [attachment_path]
+
+    # Send
     try:
-        print(f"📧 Sending professional email from {sender_email} to {recipient_email}")
+        print(f"📧 Sending email from {sender_email} to {recipient_email}")
         print(f"📄 CSV attachment: {attachment_path} ({csv_size_mb:.2f} MB)")
-        print(f"📊 Embedded charts: {len(embedded_charts)}")
+        print(f"🖼  Inline images: {len(inline_images)} (supported={supports_inline})")
         print(f"📈 Tracking {num_tickers} tickers with {num_records:,} data points")
-        
-        message_id = send_email(
-            sender=sender_email,
-            recipient=recipient_email,
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html,
-            attachment_paths=[attachment_path]  # Only CSV attachment
-        )
-        
-        print(f"✅ Professional email sent successfully! Message ID: {message_id}")
-        print(f"📊 Email includes {len(embedded_charts)} embedded charts with comprehensive analysis")
+
+        if supports_inline and inline_images:
+            message_id = send_email(
+                sender=sender_email,
+                recipient=recipient_email,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+                attachment_paths=attachment_paths,   # CSV
+                inline_images=inline_images          # CID-embedded JPEGs
+            )
+        else:
+            # Attach images if inline not supported
+            attachment_paths += [img["path"] for img in inline_images]
+            message_id = send_email(
+                sender=sender_email,
+                recipient=recipient_email,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+                attachment_paths=attachment_paths
+            )
+
+        print(f"✅ Email sent! Message ID: {message_id}")
         return 0
-        
+
+    except TypeError as e:
+        # If your email_handler doesn't support inline_images for some reason
+        print(f"ℹ️  send_email() does not support inline_images; retrying without inlines. Error: {e}")
+        try:
+            attachment_paths += [img["path"] for img in inline_images]
+            body_html_fallback = generate_charts_fallback_html([p["path"] for p in inline_images])
+            body_html_final = build_full_html(
+                current_date=current_date,
+                current_time=current_time,
+                num_tickers=num_tickers,
+                num_records=num_records,
+                csv_size_mb=csv_size_mb,
+                embedded_count=len(gallery_items),
+                attachment_path=attachment_path,
+                date_range=date_range,
+                charts_html=body_html_fallback
+            )
+            message_id = send_email(
+                sender=sender_email,
+                recipient=recipient_email,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html_final,
+                attachment_paths=attachment_paths
+            )
+            print(f"✅ Email sent (fallback mode). Message ID: {message_id}")
+            return 0
+        except Exception as e2:
+            print(f"❌ Failed to send email (fallback): {e2}")
+            import traceback
+            traceback.print_exc()
+            return 1
     except Exception as e:
         print(f"❌ Failed to send email: {e}")
         import traceback
@@ -537,48 +218,176 @@ Generated on {current_date} at {current_time}
         return 1
 
 
-def generate_charts_html(charts_dict: dict) -> str:
-    """Generate professional HTML for embedded charts."""
-    if not charts_dict:
-        return '''
-        <div class="chart-section">
-            <div class="chart-header">
-                <h3 class="chart-title">Charts Not Available</h3>
-                <p class="chart-description">Charts could not be generated for this report. Please check the data format and try again.</p>
-            </div>
-        </div>
-        '''
-    
-    html_sections = []
-    
-    for chart_key, chart_data in charts_dict.items():
-        section_html = f'''
-        <div class="chart-section">
-            <div class="chart-header">
-                <h3 class="chart-title">{chart_data['title']}</h3>
-                <p class="chart-description">{chart_data['description']}</p>
-            </div>
-            <div class="chart-content">
-                <img src="{chart_data['image']}" alt="{chart_data['title']}" class="chart-image" />
-            </div>
-        </div>
-        '''
-        html_sections.append(section_html)
-    
-    return '\n'.join(html_sections)
+def _send_email_supports_inline_images() -> bool:
+    """Detect whether send_email(sender, ..., inline_images=...) is supported."""
+    try:
+        sig = inspect.signature(send_email)
+        return 'inline_images' in sig.parameters
+    except Exception:
+        return False
 
 
-def generate_charts_text(charts_dict: dict) -> str:
-    """Generate text description of charts for plain text email."""
+def build_full_html(
+    current_date: str,
+    current_time: str,
+    num_tickers: int,
+    num_records: int,
+    csv_size_mb: float,
+    embedded_count: int,
+    attachment_path: str,
+    date_range: str,
+    charts_html: str
+) -> str:
+    """Assemble the complete HTML using your existing theme + charts_html injected."""
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Financial ETL Report - {current_date}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {{
+  margin:0; padding:0; background:#f8fafc; color:#2c3e50;
+  font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+}}
+.email-container {{ max-width:800px; margin:0 auto; background:#ffffff; }}
+.header {{ background:#667eea; color:#fff; padding:24px 18px; text-align:center; }}
+.header h1 {{ margin:0 0 6px 0; font-size:24px; }}
+.header .subtitle {{ opacity:0.9; font-size:14px; }}
+.content {{ padding:24px 18px; }}
+.summary-card {{ background:#f5f7fa; border:1px solid #e2e8f0; border-radius:12px; padding:18px; margin:18px 0; }}
+.metrics-grid {{ width:100%; border-collapse:separate; border-spacing:12px; }}
+.metric-item {{ background:#fff; border:1px solid #e2e8f0; border-radius:8px; text-align:center; padding:16px; }}
+.metric-number {{ font-size:22px; font-weight:700; color:#667eea; display:block; }}
+.metric-label {{ font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; }}
+.chart-grid {{ width:100%; border-collapse:separate; border-spacing:12px; }}
+.chart-cell {{ width:50%; vertical-align:top; }}
+.chart-card {{ background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:12px; }}
+.chart-title {{ font-size:16px; font-weight:600; margin:0 0 6px 0; color:#1a365d; }}
+.chart-desc {{ font-size:12px; color:#64748b; margin:0 0 8px 0; }}
+.chart-img {{ display:block; width:100%; height:auto; border:1px solid #e2e8f0; border-radius:6px; }}
+.footer {{ background:#263238; color:#eceff1; text-align:center; padding:16px; font-size:12px; }}
+@media (max-width:620px) {{
+  .chart-cell {{ display:block; width:100%; }}
+}}
+</style>
+</head>
+<body>
+  <div class="email-container">
+    <div class="header">
+      <h1>📊 Financial ETL Report</h1>
+      <div class="subtitle">{current_date} • {current_time}</div>
+    </div>
+    <div class="content">
+      <div class="summary-card">
+        <h2 style="margin:0 0 10px 0; font-size:18px;">Report Summary</h2>
+        <table class="metrics-grid" role="presentation" cellpadding="0" cellspacing="0" width="100%">
+          <tr>
+            <td class="metric-item">
+              <span class="metric-number">{num_tickers}</span>
+              <span class="metric-label">Assets Tracked</span>
+            </td>
+            <td class="metric-item">
+              <span class="metric-number">{num_records:,}</span>
+              <span class="metric-label">Data Points</span>
+            </td>
+            <td class="metric-item">
+              <span class="metric-number">{csv_size_mb:.1f}</span>
+              <span class="metric-label">MB CSV Data</span>
+            </td>
+            <td class="metric-item">
+              <span class="metric-number">{embedded_count}</span>
+              <span class="metric-label">Charts</span>
+            </td>
+          </tr>
+        </table>
+        <div style="font-size:13px; color:#374151; margin-top:10px;">
+          <div><strong>📄 Data File:</strong> {os.path.basename(attachment_path)}</div>
+          <div><strong>📅 Date Range:</strong> {date_range}</div>
+          <div><strong>📈 Analysis:</strong> Moving averages, RSI, volatility, daily returns</div>
+        </div>
+      </div>
+
+      {charts_html}
+
+      <div style="background:#f0f9ff; border-left:4px solid #0ea5e9; border-radius:8px; padding:12px 14px; margin:16px 0; font-size:13px; color:#0c4a6e;">
+        <strong>📎 Data Access:</strong> The CSV attachment contains full detail for custom analysis.
+      </div>
+    </div>
+    <div class="footer">
+      <div>Generated automatically by your Financial ETL Pipeline</div>
+      <div style="opacity:0.8; margin-top:6px;">© {current_date}</div>
+    </div>
+  </div>
+</body>
+</html>
+    """.strip()
+
+
+def generate_charts_grid_html(items):
+    rows = []
+    for i in range(0, len(items), 2):
+        left = items[i]
+        right = items[i+1] if i+1 < len(items) else None
+        rows.append(f"""
+<tr>
+  <td class="chart-cell">
+    <div class="chart-card">
+      <div class="chart-title">{_escape_html(left['title'])}</div>
+      <div class="chart-desc">{_escape_html(left.get('description',''))}</div>
+      <img class="chart-img" src="cid:{left['cid']}" alt="{_escape_html(left['title'])}">
+    </div>
+  </td>
+  {(
+    f'''<td class="chart-cell">
+      <div class="chart-card">
+        <div class="chart-title">{_escape_html(right['title'])}</div>
+        <div class="chart-desc">{_escape_html(right.get('description',''))}</div>
+        <img class="chart-img" src="cid:{right['cid']}" alt="{_escape_html(right['title'])}">
+      </div>
+    </td>''' if right else '<td class="chart-cell"></td>'
+  )}
+</tr>
+""")
+    return f'<table class="chart-grid" role="presentation" cellpadding="0" cellspacing="0" width="100%">{"".join(rows)}</table>'
+
+
+def generate_charts_fallback_html(paths: List[str]) -> str:
+    if not paths:
+        return ""
+    lis = "\n".join(
+        f'<li style="margin:6px 0; font-size:13px; color:#374151;">{_escape_html(os.path.basename(p))}</li>'
+        for p in paths
+    )
+    return f"""
+<div style="background:#fff3cd; border:1px solid #ffeaa7; border-radius:8px; padding:12px; margin:16px 0;">
+  <div style="color:#7c5200; font-weight:600; margin-bottom:6px;">Inline charts not supported by mailer; attached instead:</div>
+  <ul style="margin:0; padding-left:18px;">{lis}</ul>
+</div>
+""".strip()
+
+
+def generate_charts_text(charts_dict: Dict[str, Dict[str, str]]) -> str:
     if not charts_dict:
         return "• Charts could not be generated for this report"
-    
-    text_sections = []
-    
-    for i, (chart_key, chart_data) in enumerate(charts_dict.items(), 1):
-        text_sections.append(f"• {chart_data['title']}: {chart_data['description']}")
-    
-    return '\n'.join(text_sections)
+    lines = []
+    for _, cdata in charts_dict.items():
+        title = cdata.get('title', 'Chart')
+        desc = cdata.get('description', '')
+        lines.append(f"• {title}: {desc}" if desc else f"• {title}")
+    return "\n".join(lines)
+
+
+def _escape_html(s: str) -> str:
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
 
 
 if __name__ == "__main__":
