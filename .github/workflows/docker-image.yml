@@ -16,70 +16,70 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Pytest
         run: PYTHONPATH=src pytest tests/ -q
 
   run-etl:
-    needs: run-tests             # only run if tests pass
+    needs: run-tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # If you need env vars, create .env from secrets/vars here:
-      # - name: Write .env
-      #   run: |
-      #     echo "TICKERS=${{ vars.TICKERS }}" >> .env
-      #     echo "LOOKBACK_DAYS=400" >> .env
-      #     echo "RSI_PERIOD=14" >> .env
-      #     echo "API_KEY=${{ secrets.API_KEY }}" >> .env
-
       - name: Build & run ETL (Compose v2)
         run: |
           docker compose up --build --abort-on-container-exit --exit-code-from etl
+
   export-csv:
     needs: run-etl
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Copy CSV to artifacts
         run: |
           mkdir -p artifacts
           cp src/data/daily_metrics.csv artifacts/daily_metrics.csv
-
       - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
         with:
           name: daily_metrics_csv
-          path: artifacts/  # <-- required so the file actually uploads
+          path: artifacts/
 
   email-report:
+    needs: export-csv
     runs-on: ubuntu-latest
     steps:
+      # Get the CSV produced by export-csv
+      - name: Download CSV artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: daily_metrics_csv
+          path: artifacts
+
+      # Repo checkout for scripts/send_report_email.py
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install deps
         run: pip install boto3 botocore
+
+      - name: Verify attachment exists (sanity check)
+        run: |
+          ls -la artifacts
+          test -f artifacts/daily_metrics.csv
 
       - name: Send email via SES
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION:    us-west-2     # consider a repo variable instead
+          AWS_DEFAULT_REGION:    us-west-2
           SENDER_EMAIL:          ${{ secrets.SENDER_EMAIL }}
           RECIPIENT_EMAIL:       ${{ secrets.RECIPIENT_EMAIL }}
           ATTACHMENT_PATH:       artifacts/daily_metrics.csv
