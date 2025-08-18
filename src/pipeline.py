@@ -226,3 +226,9 @@ def upsert_metrics(con, metrics):
 
 if __name__== "__main__":
     print("Starting ETL pipeline...")
+    prices = fetch_prices(TICKERS, LOOKBACK_DAYS)
+    metrics = compute_tech(prices)
+    con = duckdb.connect(DB_PATH)
+    init_db(con)
+    n_metrics = upsert_metrics(con, metrics)
+    upsert_raw_prices(con, prices)
