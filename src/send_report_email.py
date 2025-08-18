@@ -3,29 +3,19 @@
 Script to send the ETL pipeline report via email.
 Called from GitHub Actions workflow.
 """
-
 import os
 import sys
-import base64
 from datetime import datetime
 from email_handler import send_email
 
-
-def embed_image_base64(file_path):
-    """Read an image file and return a base64-encoded data URI."""
-    with open(file_path, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode("utf-8")
-    return f"data:image/png;base64,{encoded}"
-
-
 def main():
     """Main function to send the ETL report email."""
-
+    
     # Get required environment variables
     sender_email = os.environ.get("SENDER_EMAIL")
     recipient_email = os.environ.get("RECIPIENT_EMAIL")
     attachment_path = os.environ.get("ATTACHMENT_PATH")  # CSV file
-
+    
     # Validate required environment variables
     missing_vars = []
     if not sender_email:
@@ -34,62 +24,49 @@ def main():
         missing_vars.append("RECIPIENT_EMAIL")
     if not attachment_path:
         missing_vars.append("ATTACHMENT_PATH")
-
+    
     if missing_vars:
         print(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
         return 1
-
+    
     # Verify CSV attachment exists
     if not os.path.exists(attachment_path):
         print(f"Error: CSV file not found: {attachment_path}")
         return 1
-
+    
     # Find chart files
     chart_dir = "artifacts/charts"
     chart_files = []
     if os.path.exists(chart_dir):
         for file in os.listdir(chart_dir):
-            if file.endswith(".png"):
+            if file.endswith('.png'):
                 chart_files.append(os.path.join(chart_dir, file))
         chart_files.sort()
         print(f"Found {len(chart_files)} chart files")
     else:
         print(f"Charts directory not found: {chart_dir}")
-
-    # Only attach the CSV — charts will be inline
-    all_attachments = [attachment_path]
-
+    
+    # Prepare all attachments
+    all_attachments = [attachment_path] + chart_files
+    
     # Get file info for email content
     csv_size = os.path.getsize(attachment_path)
     csv_size_mb = csv_size / (1024 * 1024)
-
+    
     total_size = sum(os.path.getsize(f) for f in all_attachments if os.path.exists(f))
     total_size_mb = total_size / (1024 * 1024)
-
+    
     # Create email content
     current_date = datetime.now().strftime("%Y-%m-%d")
     subject = f"📊 Financial ETL Report - {current_date}"
-
-    # Generate chart HTML inline
-    charts_html = ""
+    
+    # Generate chart list for email
+    chart_list = ""
     if chart_files:
-        charts_html = """
-        <div class="charts-box">
-            <h3 style="margin-top: 0; color: #7b1fa2;">📈 Visualization Charts</h3>
-        """
-        for chart in chart_files:
-            img_b64 = embed_image_base64(chart)
-            charts_html += f"""
-            <div style="margin-bottom:20px;">
-                <p>📊 {os.path.basename(chart)}</p>
-                <img src="{img_b64}" alt="{os.path.basename(chart)}" 
-                     style="max-width:100%; height:auto; border:1px solid #ccc; border-radius:6px;" />
-            </div>
-            """
-        charts_html += "</div>"
+        chart_list = "\n".join([f"  📈 {os.path.basename(f)}" for f in chart_files])
     else:
-        charts_html = "<p>⚠️ No charts generated</p>"
-
+        chart_list = "  ⚠️  No charts generated"
+    
     body_text = f"""
 Financial ETL Pipeline Report - {current_date}
 
@@ -100,19 +77,21 @@ Your financial data pipeline has completed successfully!
 📋 Report Summary:
 - Date: {current_date}
 - CSV Data: {os.path.basename(attachment_path)} ({csv_size_mb:.2f} MB)
-- Visualization Charts: {len(chart_files)} inline
+- Visualization Charts: {len(chart_files)} files
 
-📦 Total Package: {total_size_mb:.2f} MB across {len(all_attachments)} file(s)
+📈 Charts Included:
+{chart_list}
 
-The CSV contains daily metrics for your tracked tickers including moving averages, RSI, volatility, and returns data.
-Charts are embedded inline in this email.
+📦 Total Package: {total_size_mb:.2f} MB across {len(all_attachments)} files
+
+The CSV contains daily metrics for your tracked tickers including moving averages, RSI, volatility, and returns data. The charts provide visual analysis of price trends, technical indicators, and market volatility.
 
 This report was generated automatically by your ETL pipeline.
 
 Best regards,
 📈 Financial ETL Bot
     """.strip()
-
+    
     body_html = f"""
 <html>
 <head>
@@ -146,6 +125,13 @@ Best regards,
             margin: 20px 0;
             border-left: 4px solid #2196f3;
         }}
+        .charts-box {{ 
+            background-color: #f3e5f5; 
+            padding: 20px; 
+            border-radius: 8px; 
+            margin: 20px 0;
+            border-left: 4px solid #9c27b0;
+        }}
         .stats {{ 
             display: flex; 
             justify-content: space-between; 
@@ -169,6 +155,16 @@ Best regards,
             color: #666; 
             text-transform: uppercase;
         }}
+        .chart-list {{ 
+            list-style: none; 
+            padding: 0; 
+        }}
+        .chart-list li {{ 
+            padding: 8px 0; 
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }}
+        .chart-list li:last-child {{ border-bottom: none; }}
         .footer {{ 
             background-color: #f5f5f5; 
             color: #666; 
@@ -177,6 +173,7 @@ Best regards,
             border-radius: 0 0 10px 10px;
             font-size: 14px;
         }}
+        .emoji {{ font-size: 18px; }}
     </style>
 </head>
 <body>
@@ -199,7 +196,7 @@ Best regards,
                     </div>
                     <div class="stat-item">
                         <span class="stat-number">{len(chart_files)}</span>
-                        <span class="stat-label">Charts Inline</span>
+                        <span class="stat-label">Charts</span>
                     </div>
                     <div class="stat-item">
                         <span class="stat-number">{total_size_mb:.1f}</span>
@@ -211,9 +208,16 @@ Best regards,
                 <p><strong>📈 Analysis:</strong> Moving averages, RSI, volatility, and returns data</p>
             </div>
             
-            {charts_html}
+            {"" if not chart_files else f'''
+            <div class="charts-box">
+                <h3 style="margin-top: 0; color: #7b1fa2;">📈 Visualization Charts</h3>
+                <ul class="chart-list">
+                    {"".join([f"<li>📊 {os.path.basename(f)}</li>" for f in chart_files])}
+                </ul>
+            </div>
+            '''}
             
-            <p>The attached CSV contains comprehensive analysis of your tracked financial instruments. Charts are embedded inline above.</p>
+            <p>The attached files contain comprehensive analysis of your tracked financial instruments with technical indicators and market trends.</p>
         </div>
         
         <div class="footer">
@@ -224,32 +228,32 @@ Best regards,
 </body>
 </html>
     """.strip()
-
+    
     try:
         print(f"Sending email from {sender_email} to {recipient_email}")
         print(f"CSV attachment: {attachment_path}")
-        print(f"Chart inline count: {len(chart_files)}")
-
+        print(f"Chart attachments: {len(chart_files)}")
+        for chart in chart_files:
+            print(f"  - {chart}")
+        
         message_id = send_email(
             sender=sender_email,
             recipient=recipient_email,
             subject=subject,
             body_text=body_text,
             body_html=body_html,
-            attachment_paths=all_attachments,  # only CSV
+            attachment_paths=all_attachments  # Updated to use multiple attachments
         )
-
+        
         print(f"✅ Email sent successfully! Message ID: {message_id}")
-        print(f"📊 Sent {len(all_attachments)} attachment(s) ({total_size_mb:.2f} MB)")
+        print(f"📊 Sent {len(all_attachments)} total attachments ({total_size_mb:.2f} MB)")
         return 0
-
+        
     except Exception as e:
         print(f"❌ Failed to send email: {e}")
         import traceback
-
         traceback.print_exc()
         return 1
-
 
 if __name__ == "__main__":
     exit_code = main()
