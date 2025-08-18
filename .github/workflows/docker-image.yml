@@ -56,19 +56,20 @@ jobs:
     needs: run-etl
     runs-on: ubuntu-latest
     steps:
-      - name: Download CSV artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: daily_metrics_csv
-          path: artifacts
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      
       - name: Install deps
         run: pip install boto3 botocore
+
+      - name: Download CSV artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: daily_metrics_csv
+          path: artifacts
 
       - name: Verify attachment exists (sanity check)
         run: |
