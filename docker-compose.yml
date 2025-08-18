@@ -1,10 +1,11 @@
+# docker-compose.yml
 services:
   etl:
     build: .
     env_file: .env
     volumes:
-      - data:/stocks-etl/data
+      - ./data:/app/data        # bind mount into the container (NOT a named volume)
     command: ["python", "src/pipeline.py"]
 
-volumes:
-  data:
+# no 'volumes:' section needed anymore
+
