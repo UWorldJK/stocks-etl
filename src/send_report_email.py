@@ -5,8 +5,18 @@ Called from GitHub Actions workflow.
 """
 import os
 import sys
+import base64
 from datetime import datetime
 from email_handler import send_email
+
+def encode_image_to_base64(image_path):
+    """Encode image file to base64 string."""
+    try:
+        with open(image_path, 'rb') as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    except Exception as e:
+        print(f"Error encoding image {image_path}: {e}")
+        return None
 
 def main():
     """Main function to send the ETL report email."""
@@ -46,7 +56,18 @@ def main():
     else:
         print(f"Charts directory not found: {chart_dir}")
     
-    # Prepare all attachments
+    # Encode chart images to base64 for embedding
+    embedded_images = []
+    for i, chart_file in enumerate(chart_files):
+        base64_data = encode_image_to_base64(chart_file)
+        if base64_data:
+            embedded_images.append({
+                'filename': os.path.basename(chart_file),
+                'base64': base64_data,
+                'cid': f'chart_{i}'  # Content ID for referencing in HTML
+            })
+    
+    # Prepare all attachments (CSV + charts)
     all_attachments = [attachment_path] + chart_files
     
     # Get file info for email content
@@ -92,6 +113,26 @@ Best regards,
 📈 Financial ETL Bot
     """.strip()
     
+    # Generate embedded chart HTML
+    embedded_charts_html = ""
+    if embedded_images:
+        embedded_charts_html = """
+        <div class="charts-section">
+            <h3 style="color: #7b1fa2; margin: 30px 0 20px 0;">📈 Market Analysis Charts</h3>
+        """
+        
+        for img in embedded_images:
+            embedded_charts_html += f"""
+            <div class="chart-container">
+                <h4 style="color: #333; margin: 20px 0 10px 0;">{img['filename'].replace('.png', '').replace('_', ' ').title()}</h4>
+                <img src="data:image/png;base64,{img['base64']}" 
+                     alt="{img['filename']}" 
+                     style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 8px; margin: 10px 0;">
+            </div>
+            """
+        
+        embedded_charts_html += "</div>"
+    
     body_html = f"""
 <html>
 <head>
@@ -103,7 +144,7 @@ Best regards,
             background-color: #f8f9fa;
         }}
         .container {{
-            max-width: 600px;
+            max-width: 800px;
             margin: 0 auto;
             background-color: white;
             border-radius: 10px;
@@ -125,12 +166,12 @@ Best regards,
             margin: 20px 0;
             border-left: 4px solid #2196f3;
         }}
-        .charts-box {{ 
-            background-color: #f3e5f5; 
-            padding: 20px; 
-            border-radius: 8px; 
-            margin: 20px 0;
-            border-left: 4px solid #9c27b0;
+        .charts-section {{ 
+            margin: 30px 0;
+        }}
+        .chart-container {{
+            margin: 30px 0;
+            text-align: center;
         }}
         .stats {{ 
             display: flex; 
@@ -155,16 +196,6 @@ Best regards,
             color: #666; 
             text-transform: uppercase;
         }}
-        .chart-list {{ 
-            list-style: none; 
-            padding: 0; 
-        }}
-        .chart-list li {{ 
-            padding: 8px 0; 
-            border-bottom: 1px solid #eee;
-            font-size: 14px;
-        }}
-        .chart-list li:last-child {{ border-bottom: none; }}
         .footer {{ 
             background-color: #f5f5f5; 
             color: #666; 
@@ -208,16 +239,9 @@ Best regards,
                 <p><strong>📈 Analysis:</strong> Moving averages, RSI, volatility, and returns data</p>
             </div>
             
-            {"" if not chart_files else f'''
-            <div class="charts-box">
-                <h3 style="margin-top: 0; color: #7b1fa2;">📈 Visualization Charts</h3>
-                <ul class="chart-list">
-                    {"".join([f"<li>📊 {os.path.basename(f)}</li>" for f in chart_files])}
-                </ul>
-            </div>
-            '''}
+            {embedded_charts_html}
             
-            <p>The attached files contain comprehensive analysis of your tracked financial instruments with technical indicators and market trends.</p>
+            <p>The attached CSV file contains comprehensive analysis of your tracked financial instruments with technical indicators and market trends. Charts are also attached as separate files for your reference.</p>
         </div>
         
         <div class="footer">
@@ -233,6 +257,7 @@ Best regards,
         print(f"Sending email from {sender_email} to {recipient_email}")
         print(f"CSV attachment: {attachment_path}")
         print(f"Chart attachments: {len(chart_files)}")
+        print(f"Embedded images: {len(embedded_images)}")
         for chart in chart_files:
             print(f"  - {chart}")
         
@@ -242,11 +267,12 @@ Best regards,
             subject=subject,
             body_text=body_text,
             body_html=body_html,
-            attachment_paths=all_attachments  # Updated to use multiple attachments
+            attachment_paths=all_attachments  # Still include as attachments too
         )
         
         print(f"✅ Email sent successfully! Message ID: {message_id}")
         print(f"📊 Sent {len(all_attachments)} total attachments ({total_size_mb:.2f} MB)")
+        print(f"🖼️  Embedded {len(embedded_images)} images directly in email")
         return 0
         
     except Exception as e:
