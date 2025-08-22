@@ -393,6 +393,3 @@ def _escape_html(s: str) -> str:
 if __name__ == "__main__":
     exit_code = main()
     sys.exit(exit_code)
-
-
-pbjdubsog73sces2onqbbvvqdeilhlho._domainkey.jacobkurry.com  CNAME  pbjdubsog73sces2onqbbvvqdeilhlho.dkim.amazonses.com.
